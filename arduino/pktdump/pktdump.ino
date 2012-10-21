@@ -1,7 +1,7 @@
 /*
  * Mini tcpdump for Arduino. Show information on received frames on Serial and/or LCD.
  *
- * v0.2
+ * v0.3
  */
 
 #include <EtherCard.h>
@@ -17,14 +17,9 @@
 #endif
 
 static byte mymac[] = { 0xaa,0xaa,0xaa,0xaa,0xaa,0xaa };
-//static byte myip[] = { 192,168,20,123 };
-
-//BufferFiller bfill;
+static byte myip[] = { 192,168,20,123 };
 
 int led = HIGH;
-
-//char myipaddrstr[18] = { 0 };
-//char ipaddrstr[18] = { 0 };
 
 void printstr(String s, int print_serial, int print_lcd = 0) {
 #ifdef HAVE_LCD
@@ -54,17 +49,14 @@ void setup () {
   if (rev == 0)
     Serial.println("Failed to access Ethernet controller");
   printstr("pktdump rev="+String(rev)+" bufsize="+String(CAPTURE_SIZE), 1);
-//  ether.staticSetup(myip);
-//  ether.makeNetStr(myipaddrstr, myip, 4, '.', 10);
+  ether.staticSetup(myip);
+  //ether.makeNetStr(myipaddrstr, myip, 4, '.', 10);
 }
 
 unsigned long int n = 0;
 
 #define prh if (*p < 0xf) s += "0";s += String(*p, HEX);
 
-//static char t[10];
-
-//static const char *l2_proto_str(uint16_t ether_proto) {
 // get Layer 2 (link) information
 static const String l2_proto_str(byte *l2) {
   String s;
@@ -103,68 +95,90 @@ static const String l2_proto_str(byte *l2) {
 }
 
 // get Layer 3 (network) information
-static const String l3_proto_str(byte *l3) {
-  return "L3";
+static const String l3_proto_str(byte *l3, uint16_t l3_proto, unsigned int *l3_len) {
+  String s;
+  *l3_len = 0;
+  switch (l3_proto) {
+    case ETHERTYPE_IP:
+      struct iphdr *ip = (struct iphdr *) l3;
+//char str[200];
+//sprintf(str, "<len=%u>",ip->tot_len); 
+//s += str;
+      s += "ver=" + String(ip->version);
+      s += " hl=" + String(ip->ihl << 2);
+      s += " TOS=" + String(ip->tos); // MASK ?, TODO DSCP/ECN
+      s += " totlen=" + String(ntohs(ip->tot_len));
+      s += " ID=" + String(ntohs(ip->id));
+      s += " flags=" + String(ntohs(ip->frag_off) >> 13, BIN) + 'b';
+      s += " fragoff=" + String(ntohs(ip->frag_off) & 0x1FFF);
+      s += " ttl=" + String(ip->ttl);
+      s += " protocol=" + String(ip->protocol);
+      s += " csum=0x" + String(ntohs(ip->check), HEX);
+      //s += " saddr=0x" + String(ntohl(ip->saddr), HEX);
+      //s += " daddr=0x" + String(ntohl(ip->daddr), HEX);
+      char ipv4str[16];
+      ether.makeNetStr(ipv4str, (byte *)&(ip->saddr), 4, '.', 10);
+      s += " saddr=";
+      s += ipv4str;
+      ether.makeNetStr(ipv4str, (byte *)&(ip->daddr), 4, '.', 10);
+      s += " daddr=";
+      s += ipv4str;
+      break;    
+  }
+  return s;
 }
 
 // get Layer 4 (transport) information
 static const String l4_proto_str(byte *l4) {
-  //ether.makeNetStr(myipaddrstr, myip, 4, '.', 10);
-  return "L4";
+  String s;
+  //ether.makeNetStr(myip4addrstr, myip, 4, '.', 10);
+  return s;
+}
+
+void switch_led(void) {
+  // switch LED state when a frame was received
+  digitalWrite(13, led);
+  led = led == HIGH ? LOW : HIGH;
 }
 
 void loop () {
-//  byte *p;
-  //word i;
   String s;
   String l2_str, l3_str, l4_str;
   word framelen = ether.packetReceive();
   if (framelen == 0)
      return;
 
-  // switch LED state when a frame was received
-  digitalWrite(13, led);
-  led = led == HIGH ? LOW : HIGH;
-
-  if (framelen < ETH_HEADER_LEN) {
-     printstr(String("Received frame too short, ") + String(framelen, DEC), 1, 1);
-     return;
-  }
-
   n++;
-//  uint16_t ethproto = (*(ether.buffer+ETH_TYPE_H_P) << 8) + *(ether.buffer+ETH_TYPE_L_P);
+  switch_led();
 
   s = '#' + String(n) + " len=" + String(framelen);
 
+  if (framelen < ETH_HEADER_LEN) {
+     s += String(" short frame");
+     printstr(s, 1, 1);
+     return;
+  }
+
   l2_str = l2_proto_str(ether.buffer);
-  if (l2_str.length() > 0) {
-    s += " L2:" + l2_str;
-    l3_str = l3_proto_str(ether.buffer + ETH_HEADER_LEN);
-    if (l3_str.length() > 0) {
-      s += " L3:" + l3_str;
-      int l3len = 0;
-      l4_str = l4_proto_str(ether.buffer + ETH_HEADER_LEN + l3len);
-      if (l4_str.length() > 0) {
-        s += " L4:" + l4_str;
-      } else {
-        s += " !L4";
-      }
+  s += " L2:" + l2_str;
+
+//  printstr(s, 1);
+
+  uint16_t ethproto = (*(ether.buffer + ETH_TYPE_H_P) << 8) + *(ether.buffer + ETH_TYPE_L_P);  
+  unsigned int l3_len = 0;
+  l3_str = l3_proto_str(ether.buffer + ETH_HEADER_LEN, ethproto, &l3_len);
+  if (l3_str.length() > 0) {
+    s += " L3:" + l3_str;
+//s = l3_str;
+    l4_str = l4_proto_str(ether.buffer + ETH_HEADER_LEN + l3_len);
+    if (l4_str.length() > 0) {
+      s += " L4:" + l4_str;
     } else {
-      s += " !L3";
+      s += " unknown L4";
     }
   } else {
-    s += " !L2";  
+    s += " unknown L3";
   }
   
   printstr(s, 1, 1);
-#if 0
-  word pos = ether.packetLoop(framelen);
-  if (pos) { // check if valid tcp data is received
-    Serial.println("pkt");
-    String s= millis()/1000 + ":";
-    printstr(s, 1);
-    digitalWrite(13, led);
-    led = led == HIGH ? LOW : HIGH;
-  }
-  #endif
 }
