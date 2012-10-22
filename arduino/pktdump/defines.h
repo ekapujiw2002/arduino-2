@@ -42,3 +42,4 @@ static struct {
                    ((x)>>24 & 0x000000FFUL) )
 #define ntohl(x) htonl(x)
 
+#define LED_PIN 13
