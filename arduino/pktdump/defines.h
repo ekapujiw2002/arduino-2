@@ -4,6 +4,7 @@
 // net/ethernet.h
 #define ETHERTYPE_IP 0x0800
 #define ETHERTYPE_ARP 0x0806
+#define ETHERTYPE_VLAN 0x8100
 #define ETHERTYPE_IPV6 0x86DD
 
 // netinet/ip.h
@@ -23,13 +24,19 @@ struct iphdr {
   /* The options start here. */
 };
 
+// type of the function that can handle L3 layer packets
+typedef String (*l3_printer)(byte *l3, unsigned int payload_len);
+                                 
+extern String ip_print(byte *l3, unsigned int payload_len);
+
 static struct {
   uint16_t ether_proto;
-  char *str;
-} ether_protocol_str[] = {
- { ETHERTYPE_IP, "IP" },
- { ETHERTYPE_ARP, "ARP" },
- { ETHERTYPE_IPV6, "IPv6" },
+  l3_printer printer;
+} ether_protocol_handlers[] = {
+ { ETHERTYPE_IP, ip_print },
+ { ETHERTYPE_ARP, NULL },
+ { ETHERTYPE_VLAN, NULL },
+ { ETHERTYPE_IPV6, NULL },
  { 0, NULL }
 };
 
