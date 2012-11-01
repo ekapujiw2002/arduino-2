@@ -18,7 +18,7 @@
 // generalize LCD code for other than 16x2 displays
 // IP: check DSCP/ECN flags
 
-#define prg_version "v0.6"
+#define prg_version "v0.7"
 
 #include <EtherCard.h>
 #include "defines.h"
@@ -57,6 +57,15 @@ void printstr(String s, boolean print_serial, boolean print_lcd = 0) {
     Serial.println(s);
 }
 
+String hexdump(byte *p, unsigned int len) {
+  String s;
+  for (int i = 0; i < len; i++, p++) {
+    if (*p <= 0xf) s += '0';
+    s += String(*p, HEX);
+  }
+  return s;
+}
+
 // parse ARP packets
 String arp_print(byte *l3, unsigned int payload_len) {
   String s;
@@ -67,42 +76,41 @@ String arp_print(byte *l3, unsigned int payload_len) {
   uint8_t ar_pln = arp->ar_pln;
   uint16_t ar_op = ntohs(arp->ar_op);
   int i;
+  char ipv4str[16];
   
-  s += String("ARP ");
-  s += "htype=" + String(ar_hrd);
+  s += String("ARP len=") + String(payload_len);
+  s += " htype=" + String(ar_hrd);
   s += " ptype=0x" + String(ar_pro, HEX);
   s += " hlen=" + String(ar_hln);
   s += " plen=" + String(ar_pln);
   s += " oper=" + String(ar_op) + "(" + (ar_op == ARPOP_REQUEST ? "request" : ar_op == ARPOP_REPLY ? "reply" : "unknown operation") + ")";
 
   byte *p = arp->sha;
-  s += " sender HW=0x";
-  for (i = 0; i < ar_hln; i++, p++) {
-    if (*p <= 0xf) s += '0';
-    s += String(*p, HEX);
-  }
+  s += " sender HW=0x" + hexdump(p, ar_hln);
+  p += ar_hln;
 
-  s += " sender protoaddr=0x";
-  for (i = 0; i < ar_pln; i++, p++) {
-    if (*p <= 0xf) s += '0';
-    s += String(*p, HEX);
+  s += " sender protoaddr=";
+  if (ar_pro == ETHERTYPE_IP) {
+    ether.makeNetStr(ipv4str, p, 4, '.', 10);
+    s += String(ipv4str);
+  } else {
+    s += "=0x" + hexdump(p, ar_pln);
   }
+  p += ar_pln;
 
   if (ar_op != ARPOP_REQUEST) {
-    s += " target HW=0x";
-    for (i = 0; i < ar_hln; i++, p++) {
-      if (*p <= 0xf) s += '0';
-      s += String(*p, HEX);
-    }
+    s += " target HW=0x" + hexdump(p, ar_hln);
+  }
+  p += ar_hln;
+
+  s += " target protoaddr=";
+  if (ar_pro == ETHERTYPE_IP) {
+    ether.makeNetStr(ipv4str, p, 4, '.', 10);
+    s += String(ipv4str);
   } else {
-    p += ar_hln;
+      s += "0x" + hexdump(p, ar_pln);
   }
-  
-  s += " target protoaddr=0x";
-  for (i = 0; i < ar_pln; i++, p++) {
-    if (*p <= 0xf) s += '0';
-    s += String(*p, HEX);
-  }
+  //p += ar_pln;
 
   return s;
 }
@@ -199,6 +207,10 @@ String dump_frame(byte *frame, word frame_len) {
   }
 
   p = eth->ether_shost;
+#if 0
+s += hexdump(p, ETH_ALEN);
+p += ETH_ALEN;
+#endif
   for (i = 0; i < ETH_ALEN; i++) {
     if (*(p + i) <= 0xf) s += '0';
     s += String(*(p + i), HEX);
